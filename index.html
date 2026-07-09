@@ -416,6 +416,7 @@ let state = {
   screen: "welcome",
   name: "",
   phone: "",
+    category: "",
   current: 0,
   answers: new Array(QUESTIONS.length).fill(null),
   startTime: null,
@@ -426,6 +427,14 @@ let state = {
 
 const app = document.getElementById("app");
 const footerLinks = document.getElementById("footerLinks");
+
+const CATEGORY_LABELS = {
+  'adult_male': 'Adult (Male)',
+  'adult_female': 'Adult (Female)',
+  'youth_male': 'Youth (Male 14–25)',
+  'youth_female': 'Young sisters (Female 14–25)',
+  'uncategorized': 'Uncategorized'
+};
 
 function starSVG(extraClass){
   return `<svg class="${extraClass}" viewBox="0 0 100 100"><path d="M50 4 L58 34 L88 34 L64 52 L72 82 L50 64 L28 82 L36 52 L12 34 L42 34 Z" fill="currentColor" style="color:#c9a24b"/></svg>`;
@@ -444,7 +453,7 @@ function renderFooter(){
 }
 
 function goWelcome(){ state.screen = "welcome"; render(); }
-function goLeaderboard(){ state.screen = "leaderboard"; render(); loadLeaderboard(false); }
+function goLeaderboard(){ state.screen = "leaderboard"; render(); }
 function goAdmin(){ state.screen = "adminLogin"; render(); }
 
 /* ---------------- Welcome ---------------- */
@@ -470,14 +479,42 @@ function renderWelcome(){
     }
     state.name = name;
     state.phone = phone;
-    state.current = 0;
-    state.answers = new Array(QUESTIONS.length).fill(null);
-    state.startTime = Date.now();
-    state.autoSubmitted = false;
-    state.screen = "quiz";
-    render();
-    startTimer();
+    // Ask user to choose category before starting quiz
+    renderCategoryChoice();
   };
+}
+
+function renderCategoryChoice(){
+  app.innerHTML = `
+    <div class="card">
+      <h2 class="title">Choose category</h2>
+      <p class="sub">Please select the category that best describes you. This determines which leaderboard you'll appear on.</p>
+      <div class="row" style="margin-top:12px; margin-bottom:8px;">
+        <button class="btn" onclick="selectCategory('adult_male')">Adult (Male)</button>
+      </div>
+      <div class="row" style="margin-top:8px; margin-bottom:8px;">
+        <button class="btn" onclick="selectCategory('adult_female')">Adult (Female)</button>
+      </div>
+      <div class="row" style="margin-top:8px; margin-bottom:8px;">
+        <button class="btn" onclick="selectCategory('youth_male')">Youth (Male, age 14–25)</button>
+      </div>
+      <div class="row" style="margin-top:8px; margin-bottom:6px;">
+        <button class="btn" onclick="selectCategory('youth_female')">Young sisters (Female, age 14–25)</button>
+      </div>
+      <div style="margin-top:12px; text-align:center;"><button class="btn ghost" onclick="goWelcome()">Cancel</button></div>
+    </div>
+  `;
+}
+
+function selectCategory(cat){
+  state.category = cat;
+  state.current = 0;
+  state.answers = new Array(QUESTIONS.length).fill(null);
+  state.startTime = Date.now();
+  state.autoSubmitted = false;
+  state.screen = "quiz";
+  render();
+  startTimer();
 }
 
 /* ---------------- Quiz ---------------- */
@@ -542,6 +579,7 @@ async function submitQuiz(autoSubmitted){
   const entry = {
     name: state.name,
     phone: state.phone,
+    category: state.category || 'uncategorized',
     score: state.score,
     total: QUESTIONS.length,
     timeTaken: state.timeTaken,
@@ -604,7 +642,7 @@ async function fetchAllEntries(){
   return entries;
 }
 
-async function loadLeaderboard(){
+async function loadLeaderboard(domain = 'all'){
   const el = document.getElementById("leaderboardBody");
   if(!el) return;
   el.innerHTML = `<div class="loading">Loading results…</div>`;
@@ -614,12 +652,18 @@ async function loadLeaderboard(){
       el.innerHTML = `<div class="empty">No submissions yet — be the first to complete the quiz!</div>`;
       return;
     }
-    entries.sort((a,b) => {
+    // filter by domain if provided
+    let filtered = entries.slice();
+    if(domain && domain !== 'all'){
+      filtered = filtered.filter(e => (e.category || 'uncategorized') === domain);
+    }
+
+    filtered.sort((a,b) => {
       if(b.score !== a.score) return b.score - a.score;
       return a.timeTaken - b.timeTaken;
     });
 
-    let rows = entries.map((e, idx) => {
+    let rows = filtered.map((e, idx) => {
       const isMe = e.name === state.name && e.phone === state.phone && e.score === state.score;
       return `
         <tr class="${isMe ? 'me' : ''} rank-${idx+1}">
@@ -632,8 +676,10 @@ async function loadLeaderboard(){
       `;
     }).join("");
 
+    const totalText = filtered.length === 0 ? 'No submissions in this category yet.' : `${filtered.length} submission${filtered.length === 1 ? '' : 's'} total.`;
+
     el.innerHTML = `
-      <p class="sub" style="margin-bottom:14px;">${entries.length} submission${entries.length === 1 ? '' : 's'} total.</p>
+      <p class="sub" style="margin-bottom:14px;">${totalText}</p>
       <table>
         <thead><tr><th>Rank</th><th>Name</th><th>Phone</th><th>Score</th><th>Time</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -649,12 +695,19 @@ function renderLeaderboard(){
   app.innerHTML = `
     <div class="card">
       <h2 class="title">Leaderboard</h2>
-      <p class="sub">Ranked by score, then by fastest completion time.</p>
+      <p class="sub">Ranked by score, then by fastest completion time. Choose a category to view rankings within that group.</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <button class="btn ghost" onclick="loadLeaderboard('all')">All</button>
+        <button class="btn" onclick="loadLeaderboard('adult_male')">Adult (Male)</button>
+        <button class="btn" onclick="loadLeaderboard('adult_female')">Adult (Female)</button>
+        <button class="btn" onclick="loadLeaderboard('youth_male')">Youth (Male)</button>
+        <button class="btn" onclick="loadLeaderboard('youth_female')">Young sisters</button>
+      </div>
       <div id="leaderboardBody"><div class="loading">Loading results…</div></div>
       <button class="btn ghost" style="margin-top:18px;" onclick="loadLeaderboard()">Refresh</button>
     </div>
   `;
-  loadLeaderboard();
+  loadLeaderboard('all');
 }
 
 /* ---------------- Admin ---------------- */
@@ -701,6 +754,7 @@ async function loadAdminData(){
         <td><span class="rankpill">${idx+1}</span></td>
         <td>${escapeHtml(e.name)}${idx===0?'<span class="medal">🥇</span>':idx===1?'<span class="medal">🥈</span>':idx===2?'<span class="medal">🥉</span>':''}</td>
         <td>${escapeHtml(e.phone)}</td>
+        <td>${CATEGORY_LABELS[e.category || 'uncategorized'] || escapeHtml(e.category || 'uncategorized')}</td>
         <td>${e.score}/${e.total}</td>
         <td>${formatTime(e.timeTaken)}</td>
         <td>${new Date(e.submittedAt).toLocaleString()}</td>
@@ -710,7 +764,7 @@ async function loadAdminData(){
     el.innerHTML = `
       <p class="sub" style="margin-bottom:14px;">${entries.length} submission${entries.length === 1 ? '' : 's'} total.</p>
       <table>
-        <thead><tr><th>Rank</th><th>Name</th><th>Phone</th><th>Score</th><th>Time</th><th>Submitted</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Name</th><th>Phone</th><th>Category</th><th>Score</th><th>Time</th><th>Submitted</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <button class="btn ghost" style="margin-top:18px;" onclick="copyCSV()">Copy as CSV</button>
@@ -725,9 +779,10 @@ async function loadAdminData(){
 
 function copyCSV(){
   const entries = window._adminEntries || [];
-  let csv = "Rank,Name,Phone,Score,Total,Time (s),Submitted At\n";
+  let csv = "Rank,Name,Phone,Category,Score,Total,Time (s),Submitted At\n";
   entries.forEach((e, idx) => {
-    csv += `${idx+1},"${e.name.replace(/"/g,'""')}","${e.phone}",${e.score},${e.total},${e.timeTaken},"${e.submittedAt}"\n`;
+    const cat = CATEGORY_LABELS[e.category || 'uncategorized'] || (e.category || 'uncategorized');
+    csv += `${idx+1},"${e.name.replace(/"/g,'""')}","${e.phone}","${cat}",${e.score},${e.total},${e.timeTaken},"${e.submittedAt}"\n`;
   });
   navigator.clipboard.writeText(csv).then(() => alert("CSV copied to clipboard.")).catch(() => alert("Could not copy — please try again."));
 }
